@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Fruit Ninja Clone</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: #1a1a1a;
+            font-family: 'Arial', sans-serif;
+            touch-action: none;
+        }
+        #gameCanvas {
+            display: block;
+            background: radial-gradient(circle, #4a3328 0%, #2a1a10 100%);
+            cursor: crosshair;
+        }
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #fff;
+            font-size: 24px;
+            pointer-events: none;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+        #lives {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: #ff4444;
+            font-size: 32px;
+            pointer-events: none;
+        }
+        #gameOver {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.85);
+            padding: 40px;
+            border-radius: 20px;
+            text-align: center;
+            color: white;
+            display: none;
+            border: 4px solid #f39c12;
+        }
+        .btn {
+            background: #f39c12;
+            border: none;
+            padding: 15px 30px;
+            color: white;
+            font-size: 20px;
+            border-radius: 10px;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: 0.3s;
+        }
+        .btn:hover { background: #e67e22; }
+    </style>
+</head>
+<body>
+    <div id="ui">Score: <span id="scoreVal">0</span></div>
+    <div id="lives">XXX</div>
+    <div id="gameOver">
+        <h1>GAME OVER</h1>
+        <p>Your Score: <span id="finalScore">0</span></p>
+        <button class="btn" onclick="resetGame()">Play Again</button>
+    </div>
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreVal = document.getElementById('scoreVal');
+        const livesVal = document.getElementById('lives');
+        const gameOverDiv = document.getElementById('gameOver');
+        const finalScoreVal = document.getElementById('finalScore');
+
+        let width, height;
+        let score = 0;
+        let lives = 3;
+        let gameActive = true;
+        let fruits = [];
+        let particles = [];
+        let trail = [];
+
+        const FRUIT_TYPES = [
+            { name: 'apple', color: '#ff4444', radius: 30 },
+            { name: 'orange', color: '#ffa500', radius: 32 },
+            { name: 'watermelon', color: '#2ecc71', radius: 45 },
+            { name: 'banana', color: '#f1c40f', radius: 25 },
+            { name: 'bomb', color: '#333', radius: 28, isBomb: true }
+        ];
+
+        function init() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+            loop();
+        }
+
+        class Fruit {
+            constructor() {
+                const type = FRUIT_TYPES[Math.floor(Math.random() * FRUIT_TYPES.length)];
+                this.x = Math.random() * (width - 100) + 50;
+                this.y = height + 50;
+                this.vx = (Math.random() - 0.5) * 8;
+                this.vy = -(Math.random() * 8 + 15);
+                this.gravity = 0.25;
+                this.color = type.color;
+                this.radius = type.radius;
+                this.isBomb = type.isBomb || false;
+                this.sliced = false;
+                this.angle = 0;
+                this.rotationSpeed = (Math.random() - 0.5) * 0.1;
+            }
+
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.vy += this.gravity;
+                this.angle += this.rotationSpeed;
+            }
+
+            draw() {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.angle);
+                
+                if (this.isBomb) {
+                    ctx.fillStyle = '#000';
+                    ctx.beginPath();
+                    ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                    // Wick
+                    ctx.strokeStyle = '#f1c40f';
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.moveTo(0, -this.radius);
+                    ctx.quadraticCurveTo(10, -this.radius - 10, 5, -this.radius - 20);
+                    ctx.stroke();
+                } else if (!this.sliced) {
+                    ctx.fillStyle = this.color;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, this.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                    // Shine
+                    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+                    ctx.beginPath();
+                    ctx.arc(-this.radius/3, -this.radius/3, this.radius/4, 0, Math.PI * 2);
+                    ctx.fill();
+                } else {
+                    // Sliced halves
+                    ctx.fillStyle = this.color;
+                    ctx.beginPath();
+                    ctx.arc(-5, 0, this.radius, Math.PI/2, 3*Math.PI/2);
+                    ctx.fill();
+                    ctx.beginPath();
+                    ctx.arc(5, 0, this.radius, 3*Math.PI/2, Math.PI/2);
+                    ctx.fill();
+                }
+                ctx.restore();
+            }
+        }
+
+        class Particle {
+            constructor(x, y, color) {
+                this.x = x;
+                this.y = y;
+                this.vx = (Math.random() - 0.5) * 15;
+                this.vy = (Math.random() - 0.5) * 15;
+                this.color = color;
+                this.life = 1.0;
+                this.decay = 0.02;
+            }
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.life -= this.decay;
+            }
+            draw() {
+                ctx.globalAlpha = this.life;
+                ctx.fillStyle = this.color;
+                ctx.fillRect(this.x, this.y, 4, 4);
+                ctx.globalAlpha = 1;
+            }
+        }
+
+        function createParticles(x, y, color) {
+            for (let i = 0; i < 15; i++) {
+                particles.push(new Particle(x, y, color));
+            }
+        }
+
+        function spawnFruit() {
+            if (gameActive && Math.random() < 0.03) {
+                fruits.push(new Fruit());
+            }
+        }
+
+        function handleSlice(x1, y1, x2, y2) {
+            fruits.forEach(fruit => {
+                if (!fruit.sliced) {
+                    const dist = Math.abs((y2-y1)*fruit.x - (x2-x1)*fruit.y + x2*y1 - y2*x1) / 
+                               Math.sqrt(Math.pow(y2-y1, 2) + Math.pow(x2-x1, 2));
+                    
+                    if (dist < fruit.radius && 
+                        fruit.x > Math.min(x1, x2) - 10 && fruit.x < Math.max(x1, x2) + 10 &&
+                        fruit.y > Math.min(y1, y2) - 10 && fruit.y < Math.max(y1, y2) + 10) {
+                        
+                        if (fruit.isBomb) {
+                            endGame();
+                        } else {
+                            fruit.sliced = true;
+                            score += 10;
+                            scoreVal.innerText = score;
+                            createParticles(fruit.x, fruit.y, fruit.color);
+                        }
+                    }
+                }
+            });
+        }
+
+        function endGame() {
+            gameActive = false;
+            gameOverDiv.style.display = 'block';
+            finalScoreVal.innerText = score;
+        }
+
+        function resetGame() {
+            score = 0;
+            lives = 3;
+            gameActive = true;
+            fruits = [];
+            particles = [];
+            scoreVal.innerText = '0';
+            livesVal.innerText = 'XXX';
+            gameOverDiv.style.display = 'none';
+        }
+
+        window.addEventListener('mousemove', e => {
+            if (!gameActive) return;
+            trail.push({ x: e.clientX, y: e.clientY, life: 10 });
+            if (trail.length > 1) {
+                const p1 = trail[trail.length - 2];
+                const p2 = trail[trail.length - 1];
+                handleSlice(p1.x, p1.y, p2.x, p2.y);
+            }
+        });
+
+        window.addEventListener('touchmove', e => {
+            if (!gameActive) return;
+            const touch = e.touches[0];
+            trail.push({ x: touch.clientX, y: touch.clientY, life: 10 });
+            if (trail.length > 1) {
+                const p1 = trail[trail.length - 2];
+                const p2 = trail[trail.length - 1];
+                handleSlice(p1.x, p1.y, p2.x, p2.y);
+            }
+        });
+
+        function loop() {
+            ctx.clearRect(0, 0, width, height);
+            
+            spawnFruit();
+
+            // Trail
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+            ctx.lineWidth = 5;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            for (let i = 0; i < trail.length; i++) {
+                const p = trail[i];
+                if (i === 0) ctx.moveTo(p.x, p.y);
+                else ctx.lineTo(p.x, p.y);
+                p.life--;
+            }
+            ctx.stroke();
+            trail = trail.filter(p => p.life > 0);
+
+            // Fruits
+            fruits.forEach((fruit, index) => {
+                fruit.update();
+                fruit.draw();
+                if (fruit.y > height + 100) {
+                    if (!fruit.sliced && !fruit.isBomb && gameActive) {
+                        lives--;
+                        livesVal.innerText = 'X'.repeat(lives);
+                        if (lives <= 0) endGame();
+                    }
+                    fruits.splice(index, 1);
+                }
+            });
+
+            // Particles
+            particles.forEach((p, index) => {
+                p.update();
+                p.draw();
+                if (p.life <= 0) particles.splice(index, 1);
+            });
+
+            requestAnimationFrame(loop);
+        }
+
+        window.addEventListener('resize', () => {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+        });
+
+        init();
+    </script>
+</body>
+</html>
